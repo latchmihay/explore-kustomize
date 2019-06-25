@@ -1,0 +1,42 @@
+---
+# deployment
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: botkube
+  labels:
+    component: controller
+    app: botkube
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      component: controller
+      app: botkube
+  template:
+    metadata:
+      labels:
+        component: controller
+        app: botkube
+    spec:
+      serviceAccountName: botkube-sa
+      containers:
+        - name: botkube
+          image: "infracloud/botkube:v0.7.0"
+          imagePullPolicy: Always
+          volumeMounts:
+            - name: config-volume
+              mountPath: "/config"
+          env:
+            - name: CONFIG_PATH
+              value: "/config/"
+            # set one of the log levels- info, warn, debug, error, fatal, panic
+            - name: LOG_LEVEL
+              value: "info"
+            # set BotKube release version
+            - name: BOTKUBE_VERSION
+              value: v0.7.0
+      volumes:
+        - name: config-volume
+          configMap:
+            name: botkube-configmap

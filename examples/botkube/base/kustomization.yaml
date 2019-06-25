@@ -1,0 +1,7 @@
+resources:
+- 0namespace.yaml
+- ClusterRole-botkube-clusterrole.yaml
+- ClusterRoleBinding-botkube-clusterrolebinding.yaml
+- ConfigMap-botkube-configmap.yaml
+- Deployment-botkube.yaml
+- ServiceAccount-botkube-sa.yaml

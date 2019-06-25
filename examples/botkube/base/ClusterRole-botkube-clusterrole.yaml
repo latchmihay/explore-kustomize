@@ -1,0 +1,12 @@
+---
+# Source: botkube/templates/clusterrole.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: botkube-clusterrole
+  labels:
+    app: botkube
+rules:
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["get", "watch", "list"]

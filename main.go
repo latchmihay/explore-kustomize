@@ -7,11 +7,10 @@ import (
 	"os"
 	"path/filepath"
 	"sigs.k8s.io/kustomize/v3/k8sdeps/kunstruct"
-	transformerDeps "sigs.k8s.io/kustomize/v3/k8sdeps/transformer"
+	"sigs.k8s.io/kustomize/v3/k8sdeps/transformer"
 	"sigs.k8s.io/kustomize/v3/k8sdeps/validator"
 	"sigs.k8s.io/kustomize/v3/pkg/fs"
 	"sigs.k8s.io/kustomize/v3/pkg/ifc"
-	"sigs.k8s.io/kustomize/v3/pkg/ifc/transformer"
 	"sigs.k8s.io/kustomize/v3/pkg/loader"
 	"sigs.k8s.io/kustomize/v3/pkg/plugins"
 	"sigs.k8s.io/kustomize/v3/pkg/resmap"
@@ -36,14 +35,15 @@ func main() {
 	stdOut := os.Stdout
 	fSys := fs.MakeRealFS()
 	uf := kunstruct.NewKunstructuredFactoryImpl()
-	rf := resmap.NewFactory(resource.NewFactory(uf))
+	tf := transformer.NewFactoryImpl()
+	rf := resmap.NewFactory(resource.NewFactory(uf), tf)
 	v := validator.NewKustValidator()
-	ptf := transformerDeps.NewFactoryImpl()
+	ptf := transformer.NewFactoryImpl()
 
 	pluginConfig := plugins.DefaultPluginConfig()
 	pl := plugins.NewLoader(pluginConfig, rf)
 
-	err := kustomizeClient.RunBuild(stdOut, v, fSys, rf,  ptf, pl)
+	err := kustomizeClient.RunBuild(stdOut, v, fSys, rf, ptf, pl)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func NewOptions(inputPath, outputPath string) *Options {
 	}
 }
 
-func (o *Options) RunBuild(out io.Writer, v ifc.Validator, fSys fs.FileSystem, rf *resmap.Factory, ptf transformer.Factory, pl *plugins.Loader) error {
+func (o *Options) RunBuild(out io.Writer, v ifc.Validator, fSys fs.FileSystem, rf *resmap.Factory, ptf resmap.PatchFactory, pl *plugins.Loader) error {
 	ldr, err := loader.NewLoader(o.loadRestrictor, v, o.kustomizationPath, fSys)
 	if err != nil {
 		return err

@@ -1,22 +1,18 @@
 package main
 
 import (
-	"fmt"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
-	"sigs.k8s.io/kustomize/v3/k8sdeps/kunstruct"
-	"sigs.k8s.io/kustomize/v3/k8sdeps/transformer"
-	"sigs.k8s.io/kustomize/v3/k8sdeps/validator"
-	"sigs.k8s.io/kustomize/v3/pkg/fs"
-	"sigs.k8s.io/kustomize/v3/pkg/ifc"
-	"sigs.k8s.io/kustomize/v3/pkg/loader"
-	"sigs.k8s.io/kustomize/v3/pkg/plugins"
-	"sigs.k8s.io/kustomize/v3/pkg/resmap"
-	"sigs.k8s.io/kustomize/v3/pkg/resource"
-	"sigs.k8s.io/kustomize/v3/pkg/target"
+	"sigs.k8s.io/kustomize/api/filesys"
+	"sigs.k8s.io/kustomize/api/konfig"
+	"sigs.k8s.io/kustomize/api/krusty"
+	"sigs.k8s.io/kustomize/api/resmap"
+	"sigs.k8s.io/kustomize/api/resource"
+	"sigs.k8s.io/kustomize/api/types"
 	"sigs.k8s.io/yaml"
+	"strings"
 )
 
 func main() {
@@ -31,58 +27,43 @@ func main() {
 
 	// New Kustomization
 	kustomizeClient := NewOptions(kustomizationFilePath, kustomizationOutput)
-
-	stdOut := os.Stdout
-	fSys := fs.MakeRealFS()
-	uf := kunstruct.NewKunstructuredFactoryImpl()
-	tf := transformer.NewFactoryImpl()
-	rf := resmap.NewFactory(resource.NewFactory(uf), tf)
-	v := validator.NewKustValidator()
-	ptf := transformer.NewFactoryImpl()
-
-	pluginConfig := plugins.DefaultPluginConfig()
-	pl := plugins.NewLoader(pluginConfig, rf)
-
-	err := kustomizeClient.RunBuild(stdOut, v, fSys, rf, ptf, pl)
+	err := kustomizeClient.RunBuild(os.Stdout)
 	if err != nil {
 		log.Fatal(err)
 	}
 }
 
+// Options contain the options for running a build
 type Options struct {
 	kustomizationPath string
 	outputPath        string
-	loadRestrictor    loader.LoadRestrictorFunc
 }
 
 // NewOptions creates a Options object
-func NewOptions(inputPath, outputPath string) *Options {
+func NewOptions(p, o string) *Options {
 	return &Options{
-		kustomizationPath: inputPath,
-		outputPath:        outputPath,
-		loadRestrictor:    loader.RestrictionRootOnly,
+		kustomizationPath: p,
+		outputPath:        o,
 	}
 }
 
-func (o *Options) RunBuild(out io.Writer, v ifc.Validator, fSys fs.FileSystem, rf *resmap.Factory, ptf resmap.PatchFactory, pl *plugins.Loader) error {
-	ldr, err := loader.NewLoader(o.loadRestrictor, v, o.kustomizationPath, fSys)
+func (o *Options) RunBuild(out io.Writer) error {
+	fSys := filesys.MakeFsOnDisk()
+	options := &krusty.Options{
+		DoLegacyResourceSort: false,
+		LoadRestrictions:     types.LoadRestrictionsNone,
+		DoPrune:              false,
+		PluginConfig:         konfig.DisabledPluginConfig(),
+	}
+	k := krusty.MakeKustomizer(fSys, options)
+	m, err := k.Run(o.kustomizationPath)
 	if err != nil {
 		return err
 	}
-	defer ldr.Cleanup()
-	kt, err := target.NewKustTarget(ldr, rf, ptf, pl)
-	if err != nil {
-		return err
-	}
-	m, err := kt.MakeCustomizedResMap()
-	if err != nil {
-		return err
-	}
-
 	return o.emitResources(out, fSys, m)
 }
 
-func (o *Options) emitResources(out io.Writer, fSys fs.FileSystem, m resmap.ResMap) error {
+func (o *Options) emitResources(out io.Writer, fSys filesys.FileSystem, m resmap.ResMap) error {
 	if o.outputPath != "" && fSys.IsDir(o.outputPath) {
 		return writeIndividualFiles(fSys, o.outputPath, m)
 	}
@@ -97,24 +78,38 @@ func (o *Options) emitResources(out io.Writer, fSys fs.FileSystem, m resmap.ResM
 	return err
 }
 
-func writeIndividualFiles(fSys fs.FileSystem, folderPath string, m resmap.ResMap) error {
-	for _, res := range m.Resources() {
-		filename := filepath.Join(
-			folderPath,
-			fmt.Sprintf(
-				"%s_%s.yaml",
-				res.GetKind(),
-				res.GetName(),
-			),
-		)
-		out, err := yaml.Marshal(res.Map())
-		if err != nil {
-			return err
+func writeIndividualFiles(
+	fSys filesys.FileSystem, folderPath string, m resmap.ResMap) error {
+	byNamespace := m.GroupedByCurrentNamespace()
+	for namespace, resList := range byNamespace {
+		for _, res := range resList {
+			fName := fileName(res)
+			if len(byNamespace) > 1 {
+				fName = strings.ToLower(namespace) + "_" + fName
+			}
+			err := writeFile(fSys, folderPath, fName, res)
+			if err != nil {
+				return err
+			}
 		}
-		err = fSys.WriteFile(filename, out)
+	}
+	for _, res := range m.NonNamespaceable() {
+		err := writeFile(fSys, folderPath, fileName(res), res)
 		if err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func fileName(res *resource.Resource) string {
+	return res.GetKind() + "_" + res.GetName() + ".yaml"
+}
+
+func writeFile(fSys filesys.FileSystem, path, fName string, res *resource.Resource) error {
+	out, err := yaml.Marshal(res.Map())
+	if err != nil {
+		return err
+	}
+	return fSys.WriteFile(filepath.Join(path, fName), out)
 }
